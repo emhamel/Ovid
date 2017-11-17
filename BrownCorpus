@@ -1,0 +1,60 @@
+# coding=utf-8
+import sqlite3
+
+finalholder = []
+interholder = []
+holder = []
+
+path = ('/Users/emmahamel/Documents/brown_corpus')
+file = open(path, 'r')
+read = file.read()
+#print(read)
+
+newinput1 = read.split()
+
+for i in range(0, len(newinput1)):
+    holder.append(newinput1[i])
+
+for i in range(0, len(holder)):
+    split = list(holder[i])
+    for j in range (0, len(split)):
+        if split[j] == '_':
+            split[j] = ' '
+    join = ''.join(split)
+    interholder.append(join)
+
+holder.clear()
+
+for i in range (0, len(interholder)):
+    split = interholder[i].split()
+    finalholder.append(split)
+
+print(finalholder)
+
+connection = sqlite3.connect('browncorpus.db')
+c = connection.cursor()
+
+c.execute(
+    '''CREATE TABLE words (
+    word TEXT,
+    pos TEXT
+    ); '''
+)
+
+connection.commit()
+
+for i in range (0, len(finalholder)):
+    if  len(finalholder[i]) != 1:
+        var_word = finalholder[i][0]
+        var_pos = finalholder[i][1]
+        c.execute('''INSERT INTO words VALUES (?, ?);''', (var_word, var_pos))
+
+connection.commit()
+
+c.execute('''SELECT * from words;''')
+data = c.fetchall()
+print (data)
+
+connection.commit()
+c.close()
+connection.close()
