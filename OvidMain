@@ -1,4 +1,5 @@
 # coding=utf-8
+# Emma Hamel, Jan 4, 2017
 import re
 import random
 import sqlite3
@@ -56,6 +57,11 @@ pos_id = []
 #ovid's working sentence it creates in the writing modual
 finalsentence = []
 
+NP_rand = [[]]
+
+NP_num = []
+
+NP_name = []
 
 #indexes for our databases
 #this is important for fast, efficient sql queries
@@ -97,15 +103,16 @@ with open(path) as f:
 
             #query each word and identify the word type
             for i in range(0, len(word)):
-                cb.execute('''SELECT DISTINCT word, pos FROM words WHERE word = (?);''', (word[i].lower,))
+                cb.execute('''SELECT DISTINCT word, pos FROM words WHERE word = (?);''', (word[i],))
                 cb_data = cb.fetchall()
 
                 #if it only has one part of speech, then it only has one part of speech!...
                 if cb_data and len(cb_data) == 1:
                     pos = cb_data[0][1]
                     sentenceStr.append(pos)
-                    #cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (cb_data[0][0], cb_data[0][1]))
+                    cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (cb_data[0][0], cb_data[0][1]))
                     conn_word.commit()
+                    print(sentenceStr)
 
                 #... but if it doesn't, then ovid goes though a series of test to identify the pos
                 #using the words around it in the sentence
@@ -186,11 +193,13 @@ with open(path) as f:
                             elif nex_pos in adverb and pos in verbs:
                                 sentenceStr.append(pos)
 
-                            elif nex_pos in def_art and pos in def_art:
-                                sentenceStr.append(pos)
-
+                #our addition of the Brown Corpus does not have proper nouns
+                #therefore, any word that is not in it and is not in punctuation must be a proper noun
+                #this decides is its a singular proper noun, plural proper noun, possessive proper noun, or
+                #possessive plural proper noun
                 elif not cb_data and word[i] not in punctuation:
                     split = list(word[i])
+                    print(sentenceStr)
                     if split[-1] == 's' and split[-2] == "'":
                         pos = 'NP$'
                         sentenceStr.append(pos)
@@ -204,18 +213,49 @@ with open(path) as f:
                         conn_word.commit()
 
                     elif split[-1] == 's' and split[-2] != "'":
-                        before = sentenceStr[-1]
-                        if before == 'AT' or before == 'DTI' or before == 'DTs':
-                            pos = 'NPS'
-                            sentenceStr.append(pos)
-                            cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (word[i], pos))
-                            conn_word.commit()
 
-                        else:
-                            pos = 'NP'
-                            sentenceStr.append(pos)
-                            cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (word[i], pos))
-                            conn_word.commit()
+                        if len(sentenceStr) > 0:
+                            before = sentenceStr[-1]
+                            if before in punctuation:
+                                before = sentenceStr[-2]
+
+                            if before == 'AT' or before == 'DTI' or before == 'DTs':
+                                pos = 'NPS'
+                                sentenceStr.append(pos)
+                                cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (word[i], pos))
+                                conn_word.commit()
+
+                            else:
+                                pos = 'NP'
+                                sentenceStr.append(pos)
+                                cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (word[i], pos))
+                                conn_word.commit()
+
+                        elif len(sentenceStr) == 0:
+                            nex = word[i + 1]
+                            if nex not in punctuation:
+                                cb.execute('''SELECT word, pos FROM words WHERE word = (?);''', (nex,))
+                                next_cb_data = cb.fetchall()
+                                nex_pos = next_cb_data[0][1]
+
+                            elif nex in punctuation:
+                                nex_word = word[i + 2]
+                                cb.execute('''SELECT word, pos FROM words WHERE word = (?);''', (nex_word,))
+                                next_cb_data = cb.fetchall()
+                                nex_pos = next_cb_data[0][1]
+
+                            if nex_pos == 'AT' or nex_pos == 'DTI' or nex_pos == 'DTs':
+                                pos = 'NPS'
+                                sentenceStr.append(pos)
+                                cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (word[i], pos))
+                                conn_word.commit()
+
+                            else:
+                                pos = 'NP'
+                                sentenceStr.append(pos)
+                                cw.execute('''INSERT INTO words (word, pos) VALUES (?, ?);''', (word[i], pos))
+                                conn_word.commit()
+
 
                     elif split[-1] != 's':
                         pos = 'NP'
@@ -226,9 +266,121 @@ with open(path) as f:
                 elif not cb_data and word[i] in punctuation:
                     sentenceStr.append(word[i])
 
+                    #is its a period, the sentence is over
                     if word[i] == '.':
                         sentence = ' '.join(sentenceStr)
-                        #cs.execute('''INSERT INTO sentences (sentence) VALUES (?);''', (sentence,))
+                        cs.execute('''INSERT INTO sentences (sentence) VALUES (?);''', (sentence,))
                         conn_struct.commit()
-                        print(sentenceStr)
                         sentenceStr.clear()
+
+#count how many sentences there are, this will determine how long it is
+#This number will be used in the writing loop down below
+cs.execute('''SELECT COUNT(*) FROM sentences''')
+data = cs.fetchone()
+c_list = list(data)
+c = c_list[0]
+count = int(c)
+
+#writing modual
+for i in range (0, count):
+    cs.execute('''SELECT sentence FROM sentences ORDER BY RANDOM();''')
+    sent_data = cs.fetchone()
+
+    if sent_data:
+        #picks a sentence, and then writes a sentence on its own
+        ovids_sentence= sent_data[0]
+        pos_list = ovids_sentence.split()
+        for j in range (0, len(pos_list)):
+            pos = pos_list[j]
+
+            #this is the weighted decision
+            #certain nouns will be choosen over others, making it more of a story
+            if pos == 'NP$' or 'NPS' or 'NPS$' or 'NP':
+                #NAP database is our names and places (proper nouns) database
+                cnp.execute('''SELECT word, num FROM nap WHERE pos = (?);''', (pos,))
+                NP_data = cnp.fetchall()
+
+                #if the database is full
+                if NP_data:
+                    for x in range(0, len(NP_data)):
+                        number1 = NP_data[x][1]
+                        number2 = int(number1)
+                        rand_gen = random.randint(1, 40)
+                        number = rand_gen + number2
+                        NP_num.append(number)
+                        NP_name.append([number, NP_data[x][0], NP_data[x][1]])
+
+                    bottom_bound = random.randint(1, 19)
+                    top_bound = random.randint(20, 40)
+
+                    choice = max(NP_num)
+
+                    if choice < top_bound or choice > bottom_bound:
+                        for v in range(0, len(NP_name) - 1):
+                            if NP_name[v][0] == choice:
+                                values = list(NP_name[v])
+                                final_name = values[1]
+                                finalsentence.append(final_name)
+                                NP_int = int(values[2])
+                                NP_int += 1
+                                cnp.execute('''UPDATE nap SET num = (?) WHERE word = (?)''', (NP_int, final_name))
+                                conn_nap.commit()
+                                NP_num.clear()
+                                NP_name.clear()
+                                break
+
+                    elif choice > top_bound or choice < bottom_bound:
+                        break
+
+            cw.execute('''SELECT id, word, pos FROM words WHERE pos = ?''', (pos,))
+            info = cw.fetchall()
+
+            if info:
+                for l in range (0, len(info)):
+                    pos_id1 = info[l][0]
+                    pos_id.append(pos_id1)
+
+                array_num1 = random.sample(pos_id, 1)
+                rand_num1 = array_num1[0]
+                cw.execute('''SELECT word FROM words WHERE id = (?);''', (rand_num1,))
+                ov_choice = cw.fetchone()
+                finalsentence.append(ov_choice[0])
+                pos_id.clear()
+
+                cnp.execute('''SELECT id FROM nap WHERE word = ?''', (ov_choice[0],))
+                NP_found = cnp.fetchall()
+
+                if not NP_found:
+                    cnp.execute('''INSERT INTO nap (word, pos, num) VALUES (?, ?, 0);''', (ov_choice[0], pos))
+                    conn_nap.commit()
+
+            elif not info:
+                if pos in punctuation:
+                    finalsentence.append(pos)
+
+                    if pos == '.':
+                        fs = ' '.join(finalsentence)
+                        file.writelines(fs + "\n")
+                        cs.execute('''DELETE FROM sentences WHERE sentence = (?);''', (sent_data,))
+                        conn_struct.commit()
+                        finalsentence.clear()
+
+            elif not info and pos not in punctuation:
+                print("Error in writing mod: pos not in ovid's words or punctuation")
+
+    if not sent_data:
+        cs.execute('''SELECT COUNT(*) FROM sentences''')
+        num_data = cs.fetchone()
+        n_list = list(data)
+        n = c_list[0]
+        num_data1 = int(c)
+
+        if num_data1 > 0:
+            print("Error in writing mod: Not in sent_data!!")
+            break
+
+        if num_data == 0:
+            print("Finished")
+            break
+
+file.close()
